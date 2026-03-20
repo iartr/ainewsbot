@@ -12,14 +12,27 @@ from newsbot.models import Base
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
+def normalize_async_database_url(database_url: str) -> str:
+    if database_url.startswith("postgresql+asyncpg://") or database_url.startswith("sqlite+aiosqlite://"):
+        return database_url
+    if database_url.startswith("postgresql+psycopg://"):
+        return database_url.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if database_url.startswith("sqlite://"):
+        return database_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
+    return database_url
+
+
 def to_sync_database_url(database_url: str) -> str:
-    return (
-        database_url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
-        .replace("sqlite+aiosqlite://", "sqlite://")
-    )
+    normalized = normalize_async_database_url(database_url)
+    return normalized.replace("postgresql+asyncpg://", "postgresql+psycopg://").replace("sqlite+aiosqlite://", "sqlite://")
 
 
 def create_engine(database_url: str) -> AsyncEngine:
+    database_url = normalize_async_database_url(database_url)
     kwargs: dict[str, object] = {"pool_pre_ping": True}
     if database_url.startswith("sqlite+aiosqlite:///:memory:"):
         kwargs["poolclass"] = StaticPool
@@ -45,4 +58,3 @@ def build_alembic_config(database_url: str) -> Config:
 
 def run_migrations(database_url: str) -> None:
     command.upgrade(build_alembic_config(database_url), "head")
-
