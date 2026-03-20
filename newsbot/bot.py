@@ -59,12 +59,17 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     service: NewsBotService = context.application.bot_data[SERVICE_KEY]
-    items = await service.latest_news(limit=3)
-    if not items:
+    grouped_items = await service.latest_news_per_source(limit_per_source=3)
+    if not grouped_items:
         await update.effective_message.reply_text("Сохранённых новостей пока нет.")
         return
 
-    text = "\n\n".join(service.format_news_item(item) for item in items)
+    blocks = []
+    for source_label, items in grouped_items:
+        source_block = "\n\n".join(f"{item.title}\n{item.url}" for item in items)
+        blocks.append(f"{source_label}\n\n{source_block}")
+
+    text = "\n\n\n".join(blocks)
     await update.effective_message.reply_text(text, disable_web_page_preview=True)
 
 
@@ -127,4 +132,3 @@ def create_application(settings: Settings, service: NewsBotService, engine) -> A
     application.add_handler(CommandHandler("latest", latest_command))
     application.add_handler(CommandHandler("sources", sources_command))
     return application
-

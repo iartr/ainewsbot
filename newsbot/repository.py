@@ -66,6 +66,35 @@ class Repository:
             models = (await session.scalars(order_query)).all()
         return [_stored_news_item(model) for model in models]
 
+    async def latest_news_per_source(self, limit_per_source: int) -> list[StoredNewsItem]:
+        ranked_news = (
+            select(
+                NewsItem.id.label("id"),
+                func.row_number()
+                .over(
+                    partition_by=NewsItem.source_key,
+                    order_by=(NewsItem.published_at.desc().nullslast(), NewsItem.discovered_at.desc()),
+                )
+                .label("source_rank"),
+            )
+            .subquery()
+        )
+
+        query: Select[tuple[NewsItem]] = (
+            select(NewsItem)
+            .join(ranked_news, ranked_news.c.id == NewsItem.id)
+            .where(ranked_news.c.source_rank <= limit_per_source)
+            .order_by(
+                NewsItem.source_key.asc(),
+                NewsItem.published_at.desc().nullslast(),
+                NewsItem.discovered_at.desc(),
+            )
+        )
+
+        async with self._session_factory() as session:
+            models = (await session.scalars(query)).all()
+        return [_stored_news_item(model) for model in models]
+
     async def upsert_subscriber(self, chat_id: int, chat_type: str) -> SubscriptionStatus:
         async with self._session_factory() as session:
             subscriber = await session.get(Subscriber, chat_id)
@@ -144,4 +173,3 @@ class Repository:
                     )
                 ).all()
             )
-

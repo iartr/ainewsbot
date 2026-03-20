@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from collections.abc import Iterable
 
 import httpx
@@ -67,6 +68,19 @@ class NewsBotService:
     async def latest_news(self, limit: int = 3) -> list[StoredNewsItem]:
         return await self._repository.latest_news(limit)
 
+    async def latest_news_per_source(self, limit_per_source: int = 3) -> list[tuple[str, list[StoredNewsItem]]]:
+        items = await self._repository.latest_news_per_source(limit_per_source)
+        grouped: OrderedDict[str, list[StoredNewsItem]] = OrderedDict((source.key, []) for source in self._sources)
+
+        for item in items:
+            grouped.setdefault(item.source_key, []).append(item)
+
+        return [
+            (self._source_labels.get(source_key, source_key), source_items)
+            for source_key, source_items in grouped.items()
+            if source_items
+        ]
+
     async def poll_sources(self) -> list[StoredNewsItem]:
         discovered: list[StoredNewsItem] = []
         for source in self._sources:
@@ -117,4 +131,3 @@ class NewsBotService:
                 deliveries_sent += 1
 
         return deliveries_sent
-

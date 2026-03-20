@@ -176,13 +176,34 @@ async def test_latest_and_sources_views_are_available(db_bundle) -> None:
         latest_on_start_count=3,
     )
     try:
+        now = datetime(2026, 3, 20, 14, 0, tzinfo=UTC)
+        for index in range(4):
+            await repository.insert_news_item(
+                make_item("openai", "OpenAI", f"openai-{index}", f"OpenAI {index}", now - timedelta(minutes=index))
+            )
+        for index in range(2):
+            await repository.insert_news_item(
+                make_item(
+                    "anthropic",
+                    "Anthropic Newsroom",
+                    f"anthropic-{index}",
+                    f"Anthropic {index}",
+                    now - timedelta(hours=index + 2),
+                )
+            )
         await repository.insert_news_item(
-            make_item("openai", "OpenAI", "recent", "Recent item", datetime(2026, 3, 20, 14, 0, tzinfo=UTC))
+            make_item("telegram_bot_api", "Telegram Bot API", "telegram-0", "Telegram 0", now - timedelta(days=1))
         )
+
         latest = await service.latest_news(limit=3)
+        grouped = await service.latest_news_per_source(limit_per_source=3)
         labels = service.source_labels()
     finally:
         await service.aclose()
 
-    assert [item.title for item in latest] == ["Recent item"]
+    assert [item.title for item in latest] == ["OpenAI 0", "OpenAI 1", "OpenAI 2"]
+    assert [source_label for source_label, _ in grouped] == ["OpenAI", "Anthropic Newsroom", "Telegram Bot API"]
+    assert [item.title for item in grouped[0][1]] == ["OpenAI 0", "OpenAI 1", "OpenAI 2"]
+    assert [item.title for item in grouped[1][1]] == ["Anthropic 0", "Anthropic 1"]
+    assert [item.title for item in grouped[2][1]] == ["Telegram 0"]
     assert labels == ["OpenAI", "Anthropic Newsroom", "Telegram Bot API"]
