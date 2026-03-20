@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Literal
+
+from sqlalchemy import Select, func, select
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from newsbot.entities import NormalizedNewsItem, StoredNewsItem, SubscriberRecord, utcnow
+from newsbot.models import Delivery, NewsItem, Subscriber
+
+SubscriptionStatus = Literal["created", "reactivated", "unchanged"]
+
+
+def _stored_news_item(model: NewsItem) -> StoredNewsItem:
+    return StoredNewsItem(
+        id=model.id,
+        source_key=model.source_key,
+        title=model.title,
+        url=model.url,
+        published_at=model.published_at,
+        discovered_at=model.discovered_at,
+    )
+
+
+class Repository:
+    def __init__(self, session_factory: async_sessionmaker):
+        self._session_factory = session_factory
+
+    async def count_news_items(self) -> int:
+        async with self._session_factory() as session:
+            value = await session.scalar(select(func.count()).select_from(NewsItem))
+            return int(value or 0)
+
+    async def insert_news_item(self, item: NormalizedNewsItem) -> StoredNewsItem | None:
+        async with self._session_factory() as session:
+            existing = await session.scalar(
+                select(NewsItem).where(
+                    NewsItem.source_key == item.source_key,
+                    NewsItem.external_id == item.external_id,
+                )
+            )
+            if existing is not None:
+                return None
+
+            news_item = NewsItem(
+                source_key=item.source_key,
+                external_id=item.external_id,
+                title=item.title,
+                url=item.url,
+                published_at=item.published_at,
+                discovered_at=item.discovered_at,
+            )
+            session.add(news_item)
+            await session.commit()
+            await session.refresh(news_item)
+            return _stored_news_item(news_item)
+
+    async def latest_news(self, limit: int) -> list[StoredNewsItem]:
+        order_query: Select[tuple[NewsItem]] = (
+            select(NewsItem)
+            .order_by(NewsItem.published_at.desc().nullslast(), NewsItem.discovered_at.desc())
+            .limit(limit)
+        )
+        async with self._session_factory() as session:
+            models = (await session.scalars(order_query)).all()
+        return [_stored_news_item(model) for model in models]
+
+    async def upsert_subscriber(self, chat_id: int, chat_type: str) -> SubscriptionStatus:
+        async with self._session_factory() as session:
+            subscriber = await session.get(Subscriber, chat_id)
+            if subscriber is None:
+                session.add(Subscriber(chat_id=chat_id, chat_type=chat_type, is_active=True))
+                await session.commit()
+                return "created"
+
+            subscriber.chat_type = chat_type
+            subscriber.updated_at = utcnow()
+            if not subscriber.is_active:
+                subscriber.is_active = True
+                await session.commit()
+                return "reactivated"
+
+            await session.commit()
+            return "unchanged"
+
+    async def deactivate_subscriber(self, chat_id: int) -> bool:
+        async with self._session_factory() as session:
+            subscriber = await session.get(Subscriber, chat_id)
+            if subscriber is None or not subscriber.is_active:
+                return False
+
+            subscriber.is_active = False
+            subscriber.updated_at = utcnow()
+            await session.commit()
+            return True
+
+    async def active_subscribers(self) -> list[SubscriberRecord]:
+        async with self._session_factory() as session:
+            subscribers = (
+                await session.scalars(select(Subscriber).where(Subscriber.is_active.is_(True)).order_by(Subscriber.chat_id))
+            ).all()
+        return [SubscriberRecord(chat_id=item.chat_id, chat_type=item.chat_type) for item in subscribers]
+
+    async def create_delivery(self, news_item_id: int, chat_id: int) -> int | None:
+        async with self._session_factory() as session:
+            existing = await session.scalar(
+                select(Delivery).where(Delivery.news_item_id == news_item_id, Delivery.chat_id == chat_id)
+            )
+            if existing is not None:
+                return None
+
+            delivery = Delivery(news_item_id=news_item_id, chat_id=chat_id)
+            session.add(delivery)
+            await session.commit()
+            await session.refresh(delivery)
+            return delivery.id
+
+    async def mark_delivery_sent(self, delivery_id: int) -> None:
+        async with self._session_factory() as session:
+            delivery = await session.get(Delivery, delivery_id)
+            if delivery is None:
+                return
+            delivery.sent_at = utcnow()
+            delivery.error_text = None
+            await session.commit()
+
+    async def mark_delivery_failed(self, delivery_id: int, error_text: str) -> None:
+        async with self._session_factory() as session:
+            delivery = await session.get(Delivery, delivery_id)
+            if delivery is None:
+                return
+            delivery.error_text = error_text[:2000]
+            await session.commit()
+
+    async def deliveries_for_chat(self, chat_id: int) -> Sequence[Delivery]:
+        async with self._session_factory() as session:
+            return tuple(
+                (
+                    await session.scalars(
+                        select(Delivery)
+                        .where(Delivery.chat_id == chat_id)
+                        .order_by(Delivery.news_item_id.asc(), Delivery.id.asc())
+                    )
+                ).all()
+            )
+

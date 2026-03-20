@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>OpenAI News</title>
+    <item>
+      <title>How we monitor internal coding agents for misalignment</title>
+      <link>https://openai.com/index/how-we-monitor-internal-coding-agents-misalignment</link>
+      <guid isPermaLink="true">https://openai.com/index/how-we-monitor-internal-coding-agents-misalignment</guid>
+      <pubDate>Thu, 19 Mar 2026 10:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>OpenAI to acquire Astral</title>
+      <link>https://openai.com/index/openai-to-acquire-astral</link>
+      <guid isPermaLink="true">https://openai.com/index/openai-to-acquire-astral</guid>
+      <pubDate>Thu, 19 Mar 2026 00:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
+

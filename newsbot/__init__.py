@@ -1,0 +1,2 @@
+"""Telegram news bot package."""
+

@@ -1,0 +1,10 @@
+alembic==1.14.1
+asyncpg==0.30.0
+beautifulsoup4==4.12.3
+feedparser==6.0.11
+greenlet==3.1.1
+httpx==0.28.1
+lxml==5.3.0
+psycopg[binary]==3.2.3
+python-telegram-bot[job-queue]==21.10
+SQLAlchemy==2.0.37
