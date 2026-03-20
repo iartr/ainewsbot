@@ -26,12 +26,12 @@ def test_parse_anthropic_listing_extracts_unique_article_links() -> None:
     candidates = parse_anthropic_listing(read_fixture("anthropic_newsroom.html"))
 
     assert [candidate.url for candidate in candidates[:4]] == [
-        "https://www.anthropic.com/news/what-81000-people-want-from-ai",
+        "https://www.anthropic.com/81k-interviews",
         "https://www.anthropic.com/news/introducing-claude-sonnet-4-6",
         "https://www.anthropic.com/news/claude-partner-network",
         "https://www.anthropic.com/news/sydney-fourth-office-asia-pacific",
     ]
-    assert candidates[0].published_at is None
+    assert candidates[0].published_at is not None
     assert candidates[2].published_at is not None
 
 
@@ -46,10 +46,14 @@ def test_extract_title_from_listing_text_strips_category_and_excerpt() -> None:
     assert extract_title_from_listing_text(text) == "Introducing Claude Sonnet 4.6 Sonnet 4.6 delivers frontier performance across coding"
 
 
+def test_extract_title_from_listing_text_prefers_title_before_date_for_featured_cards() -> None:
+    text = "What 81,000 people want from AI Mar 18, 2026 We invited Claude.ai users to share how they use AI."
+    assert extract_title_from_listing_text(text) == "What 81,000 people want from AI"
+
+
 def test_parse_telegram_changelog_uses_latest_heading() -> None:
     item = parse_telegram_changelog(read_fixture("telegram_changelog.html"))
 
     assert item.source_key == "telegram_bot_api"
     assert item.title == "March 1, 2026 / Bot API 9.5"
     assert item.url == "https://core.telegram.org/bots/api-changelog#march-1-2026"
-

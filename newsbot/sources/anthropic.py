@@ -59,6 +59,21 @@ def _looks_like_article_link(url: str) -> bool:
     return path.startswith("/news/") and path != "/news"
 
 
+def _is_internal_article_card(anchor, url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.netloc not in {"", "www.anthropic.com", "anthropic.com"}:
+        return False
+
+    path = parsed.path
+    if not path or path == "/" or path == "/news":
+        return False
+
+    if path.startswith("/news/"):
+        return True
+
+    return bool(anchor.find("time")) and bool(anchor.find(["h1", "h2", "h3", "h4", "h5", "h6"]))
+
+
 def parse_anthropic_listing(content: str) -> list[AnthropicCandidate]:
     soup = BeautifulSoup(content, "lxml")
     root = soup.find("main") or soup
@@ -68,7 +83,7 @@ def parse_anthropic_listing(content: str) -> list[AnthropicCandidate]:
     for anchor in root.select("a[href]"):
         href = anchor.get("href", "")
         absolute_url = urljoin(ANTHROPIC_NEWS_URL, href)
-        if not _looks_like_article_link(absolute_url):
+        if not _is_internal_article_card(anchor, absolute_url):
             continue
         if absolute_url in seen:
             continue
@@ -105,7 +120,7 @@ def extract_title_from_listing_text(raw_text: str) -> str:
                 after = after[len(prefix) :].strip()
                 break
 
-        candidate = after or before or text
+        candidate = after if not before else before
     else:
         candidate = text
 
