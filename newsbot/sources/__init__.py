@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from newsbot.sources.anthropic import AnthropicNewsSource
 from newsbot.sources.openai import OpenAINewsSource
+from newsbot.sources.openai_blog import OpenAIBlogSource
 from newsbot.sources.telegram_api import TelegramBotApiSource
 
 
 def build_sources() -> list:
     return [
         OpenAINewsSource(),
+        OpenAIBlogSource(),
         AnthropicNewsSource(),
         TelegramBotApiSource(),
     ]
-

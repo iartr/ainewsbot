@@ -66,7 +66,7 @@ async def latest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     blocks = []
     for source_label, items in grouped_items:
-        source_block = "\n\n".join(f"{item.title}\n{item.url}" for item in items)
+        source_block = "\n\n".join(service.format_latest_news_item(item) for item in items)
         blocks.append(f"{source_label}\n\n{source_block}")
 
     text = "\n\n\n".join(blocks)

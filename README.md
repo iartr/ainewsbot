@@ -1,6 +1,6 @@
 # Telegram News Bot
 
-Telegram bot that watches OpenAI News RSS, Anthropic Newsroom, and the Telegram Bot API changelog, stores discovered items in Postgres, and broadcasts only new items to subscribed chats.
+Telegram bot that watches OpenAI News RSS, OpenAI Blog, Anthropic Newsroom, and the Telegram Bot API changelog, stores discovered items in Postgres, and broadcasts only new items to subscribed chats.
 
 ## Features
 

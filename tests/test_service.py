@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
 
-from newsbot.entities import NormalizedNewsItem
+from newsbot.entities import NormalizedNewsItem, StoredNewsItem
 from newsbot.models import Delivery, NewsItem
 from newsbot.service import NewsBotService
 from newsbot.sources.base import NewsSource
 
 
-def make_item(source_key: str, source_label: str, external_id: str, title: str, published_at: datetime) -> NormalizedNewsItem:
+def make_item(
+    source_key: str,
+    source_label: str,
+    external_id: str,
+    title: str,
+    published_at: datetime | None,
+) -> NormalizedNewsItem:
     return NormalizedNewsItem(
         source_key=source_key,
         source_label=source_label,
@@ -44,6 +51,23 @@ class FakeBot:
         if chat_id in self.fail_chat_ids:
             raise RuntimeError(f"send failure for {chat_id}")
         self.messages.append((chat_id, text))
+
+
+def make_stored_item(
+    source_key: str,
+    title: str,
+    external_id: str,
+    published_at: datetime | None,
+    discovered_at: datetime,
+) -> StoredNewsItem:
+    return StoredNewsItem(
+        id=1,
+        source_key=source_key,
+        title=title,
+        url=f"https://example.com/{external_id}",
+        published_at=published_at,
+        discovered_at=discovered_at,
+    )
 
 
 @pytest.mark.asyncio
@@ -124,6 +148,7 @@ async def test_poll_and_broadcast_is_deduplicated(db_bundle) -> None:
     assert sent_first == 1
     assert sent_second == 0
     assert len(bot.messages) == 1
+    assert bot.messages[0][1] == "OpenAI\n20.03.2026\nOne title\nhttps://example.com/same-item"
     assert len(latest) == 1
 
 
@@ -169,6 +194,7 @@ async def test_latest_and_sources_views_are_available(db_bundle) -> None:
         repository,
         [
             StaticSource("openai", "OpenAI"),
+            StaticSource("openai_blog", "OpenAI Blog"),
             StaticSource("anthropic", "Anthropic Newsroom"),
             StaticSource("telegram_bot_api", "Telegram Bot API"),
         ],
@@ -180,6 +206,16 @@ async def test_latest_and_sources_views_are_available(db_bundle) -> None:
         for index in range(4):
             await repository.insert_news_item(
                 make_item("openai", "OpenAI", f"openai-{index}", f"OpenAI {index}", now - timedelta(minutes=index))
+            )
+        for index in range(2):
+            await repository.insert_news_item(
+                make_item(
+                    "openai_blog",
+                    "OpenAI Blog",
+                    f"openai-blog-{index}",
+                    f"OpenAI Blog {index}",
+                    now - timedelta(minutes=index + 10),
+                )
             )
         for index in range(2):
             await repository.insert_news_item(
@@ -202,8 +238,85 @@ async def test_latest_and_sources_views_are_available(db_bundle) -> None:
         await service.aclose()
 
     assert [item.title for item in latest] == ["OpenAI 0", "OpenAI 1", "OpenAI 2"]
-    assert [source_label for source_label, _ in grouped] == ["OpenAI", "Anthropic Newsroom", "Telegram Bot API"]
+    assert [source_label for source_label, _ in grouped] == ["OpenAI", "OpenAI Blog", "Anthropic Newsroom", "Telegram Bot API"]
     assert [item.title for item in grouped[0][1]] == ["OpenAI 0", "OpenAI 1", "OpenAI 2"]
-    assert [item.title for item in grouped[1][1]] == ["Anthropic 0", "Anthropic 1"]
-    assert [item.title for item in grouped[2][1]] == ["Telegram 0"]
-    assert labels == ["OpenAI", "Anthropic Newsroom", "Telegram Bot API"]
+    assert [item.title for item in grouped[1][1]] == ["OpenAI Blog 0", "OpenAI Blog 1"]
+    assert [item.title for item in grouped[2][1]] == ["Anthropic 0", "Anthropic 1"]
+    assert [item.title for item in grouped[3][1]] == ["Telegram 0"]
+    assert labels == ["OpenAI", "OpenAI Blog", "Anthropic Newsroom", "Telegram Bot API"]
+
+
+def test_format_news_item_includes_date_when_available() -> None:
+    service = NewsBotService(object(), [], request_timeout_seconds=5, latest_on_start_count=3)
+
+    item = make_item(
+        "openai",
+        "OpenAI",
+        "dated-item",
+        "Dated title",
+        datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
+    )
+
+    try:
+        formatted = service.format_news_item(item)
+    finally:
+        asyncio.run(service.aclose())
+
+    assert formatted == "OpenAI\n20.03.2026\nDated title\nhttps://example.com/dated-item"
+
+
+def test_format_news_item_omits_date_when_missing() -> None:
+    service = NewsBotService(object(), [], request_timeout_seconds=5, latest_on_start_count=3)
+
+    item = make_item(
+        "openai",
+        "OpenAI",
+        "undated-item",
+        "Undated title",
+        None,
+    )
+
+    try:
+        formatted = service.format_news_item(item)
+    finally:
+        asyncio.run(service.aclose())
+
+    assert formatted == "OpenAI\nUndated title\nhttps://example.com/undated-item"
+
+
+def test_format_latest_news_item_includes_date_and_omits_source() -> None:
+    service = NewsBotService(object(), [], request_timeout_seconds=5, latest_on_start_count=3)
+
+    item = make_stored_item(
+        "openai",
+        "Latest title",
+        "latest-item",
+        datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
+        datetime(2026, 3, 20, 10, 5, tzinfo=UTC),
+    )
+
+    try:
+        formatted = service.format_latest_news_item(item)
+    finally:
+        asyncio.run(service.aclose())
+
+    assert formatted == "20.03.2026\nLatest title\nhttps://example.com/latest-item"
+
+
+def test_format_latest_news_item_omits_date_when_missing() -> None:
+    service = NewsBotService(object(), [], request_timeout_seconds=5, latest_on_start_count=3)
+
+    item = make_stored_item(
+        "openai",
+        "Latest without date",
+        "latest-item-no-date",
+        None,
+        datetime(2026, 3, 20, 10, 5, tzinfo=UTC),
+    )
+
+    try:
+        formatted = service.format_latest_news_item(item)
+    finally:
+        asyncio.run(service.aclose())
+
+    assert formatted == "Latest without date\nhttps://example.com/latest-item-no-date"

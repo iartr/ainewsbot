@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections import OrderedDict
 from collections.abc import Iterable
+from datetime import datetime
 
 import httpx
 
@@ -37,9 +38,30 @@ class NewsBotService:
     def source_labels(self) -> list[str]:
         return [source.label for source in self._sources]
 
+    def _format_item_date(self, item: StoredNewsItem | NormalizedNewsItem) -> str | None:
+        published_at = getattr(item, "published_at", None)
+        if published_at is None:
+            return None
+        if not isinstance(published_at, datetime):
+            return None
+        return published_at.strftime("%d.%m.%Y")
+
     def format_news_item(self, item: StoredNewsItem | NormalizedNewsItem) -> str:
         source_label = getattr(item, "source_label", self._source_labels.get(item.source_key, item.source_key))
-        return f"{source_label}\n{item.title}\n{item.url}"
+        parts = [source_label]
+        formatted_date = self._format_item_date(item)
+        if formatted_date is not None:
+            parts.append(formatted_date)
+        parts.extend([item.title, item.url])
+        return "\n".join(parts)
+
+    def format_latest_news_item(self, item: StoredNewsItem | NormalizedNewsItem) -> str:
+        parts: list[str] = []
+        formatted_date = self._format_item_date(item)
+        if formatted_date is not None:
+            parts.append(formatted_date)
+        parts.extend([item.title, item.url])
+        return "\n".join(parts)
 
     async def bootstrap(self) -> bool:
         if await self._repository.count_news_items() > 0:

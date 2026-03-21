@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from newsbot.sources.anthropic import extract_title_from_listing_text, parse_anthropic_article_title, parse_anthropic_listing
 from newsbot.sources.openai import parse_openai_rss
+from newsbot.sources.openai_blog import (
+    parse_openai_blog_article_published_at,
+    parse_openai_blog_article_title,
+    parse_openai_blog_listing,
+)
 from newsbot.sources.telegram_api import parse_telegram_changelog
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -20,6 +26,28 @@ def test_parse_openai_rss_returns_items() -> None:
     assert items[0].source_key == "openai"
     assert items[0].title == "How we monitor internal coding agents for misalignment"
     assert items[0].url == "https://openai.com/index/how-we-monitor-internal-coding-agents-misalignment"
+
+
+def test_parse_openai_blog_listing_extracts_unique_article_links_in_order() -> None:
+    candidates = parse_openai_blog_listing(read_fixture("openai_blog_listing.html"))
+
+    assert [candidate.url for candidate in candidates] == [
+        "https://developers.openai.com/blog/designing-delightful-frontends-with-gpt-5-4",
+        "https://developers.openai.com/blog/one-year-of-responses",
+        "https://developers.openai.com/blog/building-frontend-uis-with-codex-and-figma",
+    ]
+    assert [candidate.fallback_title for candidate in candidates] == [
+        "Designing delightful frontends with GPT-5.4",
+        "From prompts to products: One year of Responses",
+        "Building frontend UIs with Codex and Figma",
+    ]
+
+
+def test_parse_openai_blog_article_extracts_title_and_published_at() -> None:
+    content = read_fixture("openai_blog_article.html")
+
+    assert parse_openai_blog_article_title(content) == "Designing delightful frontends with GPT-5.4"
+    assert parse_openai_blog_article_published_at(content) == datetime(2026, 3, 20, 0, 0, tzinfo=UTC)
 
 
 def test_parse_anthropic_listing_extracts_unique_article_links() -> None:
