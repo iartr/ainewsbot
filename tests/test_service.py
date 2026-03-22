@@ -196,6 +196,7 @@ async def test_latest_and_sources_views_are_available(db_bundle) -> None:
             StaticSource("openai", "OpenAI"),
             StaticSource("openai_blog", "OpenAI Blog"),
             StaticSource("anthropic", "Anthropic Newsroom"),
+            StaticSource("claude_blog", "Claude Blog"),
             StaticSource("telegram_bot_api", "Telegram Bot API"),
         ],
         request_timeout_seconds=5,
@@ -227,6 +228,16 @@ async def test_latest_and_sources_views_are_available(db_bundle) -> None:
                     now - timedelta(hours=index + 2),
                 )
             )
+        for index in range(2):
+            await repository.insert_news_item(
+                make_item(
+                    "claude_blog",
+                    "Claude Blog",
+                    f"claude-blog-{index}",
+                    f"Claude Blog {index}",
+                    now - timedelta(hours=index + 1),
+                )
+            )
         await repository.insert_news_item(
             make_item("telegram_bot_api", "Telegram Bot API", "telegram-0", "Telegram 0", now - timedelta(days=1))
         )
@@ -238,12 +249,19 @@ async def test_latest_and_sources_views_are_available(db_bundle) -> None:
         await service.aclose()
 
     assert [item.title for item in latest] == ["OpenAI 0", "OpenAI 1", "OpenAI 2"]
-    assert [source_label for source_label, _ in grouped] == ["OpenAI", "OpenAI Blog", "Anthropic Newsroom", "Telegram Bot API"]
+    assert [source_label for source_label, _ in grouped] == [
+        "OpenAI",
+        "OpenAI Blog",
+        "Anthropic Newsroom",
+        "Claude Blog",
+        "Telegram Bot API",
+    ]
     assert [item.title for item in grouped[0][1]] == ["OpenAI 0", "OpenAI 1", "OpenAI 2"]
     assert [item.title for item in grouped[1][1]] == ["OpenAI Blog 0", "OpenAI Blog 1"]
     assert [item.title for item in grouped[2][1]] == ["Anthropic 0", "Anthropic 1"]
-    assert [item.title for item in grouped[3][1]] == ["Telegram 0"]
-    assert labels == ["OpenAI", "OpenAI Blog", "Anthropic Newsroom", "Telegram Bot API"]
+    assert [item.title for item in grouped[3][1]] == ["Claude Blog 0", "Claude Blog 1"]
+    assert [item.title for item in grouped[4][1]] == ["Telegram 0"]
+    assert labels == ["OpenAI", "OpenAI Blog", "Anthropic Newsroom", "Claude Blog", "Telegram Bot API"]
 
 
 def test_format_news_item_includes_date_when_available() -> None:

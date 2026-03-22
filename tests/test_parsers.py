@@ -4,6 +4,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from newsbot.sources.anthropic import extract_title_from_listing_text, parse_anthropic_article_title, parse_anthropic_listing
+from newsbot.sources.claude_blog import (
+    parse_claude_blog_article_published_at,
+    parse_claude_blog_article_title,
+    parse_claude_blog_listing,
+)
 from newsbot.sources.openai import parse_openai_rss
 from newsbot.sources.openai_blog import (
     parse_openai_blog_article_published_at,
@@ -48,6 +53,33 @@ def test_parse_openai_blog_article_extracts_title_and_published_at() -> None:
 
     assert parse_openai_blog_article_title(content) == "Designing delightful frontends with GPT-5.4"
     assert parse_openai_blog_article_published_at(content) == datetime(2026, 3, 20, 0, 0, tzinfo=UTC)
+
+
+def test_parse_claude_blog_listing_extracts_unique_article_links_in_order() -> None:
+    candidates = parse_claude_blog_listing(read_fixture("claude_blog_listing.html"))
+
+    assert [candidate.url for candidate in candidates] == [
+        "https://claude.com/blog/claude-builds-visuals",
+        "https://claude.com/blog/how-enterprises-are-building-ai-agents-in-2026",
+        "https://claude.com/blog/improving-frontend-design-through-skills",
+    ]
+    assert [candidate.fallback_title for candidate in candidates] == [
+        "Claude now creates interactive charts, diagrams and visualizations",
+        "How enterprises are building AI agents in 2026",
+        "Improving frontend design through Skills",
+    ]
+    assert [candidate.fallback_published_at for candidate in candidates] == [
+        datetime(2026, 3, 12, 0, 0, tzinfo=UTC),
+        datetime(2025, 12, 9, 0, 0, tzinfo=UTC),
+        datetime(2025, 11, 12, 0, 0, tzinfo=UTC),
+    ]
+
+
+def test_parse_claude_blog_article_extracts_visible_title_and_published_at() -> None:
+    content = read_fixture("claude_blog_article.html")
+
+    assert parse_claude_blog_article_title(content) == "Claude now creates interactive charts, diagrams and visualizations"
+    assert parse_claude_blog_article_published_at(content) == datetime(2026, 3, 12, 0, 0, tzinfo=UTC)
 
 
 def test_parse_anthropic_listing_extracts_unique_article_links() -> None:
