@@ -4,11 +4,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from newsbot.sources.anthropic import extract_title_from_listing_text, parse_anthropic_article_title, parse_anthropic_listing
+from newsbot.sources.apple_podcasts import (
+    merge_podcast_items,
+    parse_apple_podcast_listing,
+    parse_apple_podcast_lookup_items,
+)
 from newsbot.sources.claude_blog import (
     parse_claude_blog_article_published_at,
     parse_claude_blog_article_title,
     parse_claude_blog_listing,
 )
+from newsbot.entities import NormalizedNewsItem
 from newsbot.sources.openai import parse_openai_rss
 from newsbot.sources.openai_blog import (
     parse_openai_blog_article_published_at,
@@ -48,6 +54,97 @@ def test_parse_rss_items_parses_transistor_feed_entries() -> None:
     assert items[0].title == "Episode One"
     assert items[0].url == "https://example.com/podcast/episode-one"
     assert items[0].published_at == datetime(2026, 3, 27, 7, 0, tzinfo=UTC)
+
+
+def test_parse_apple_podcast_listing_includes_subscribers_only_items() -> None:
+    items = parse_apple_podcast_listing(
+        read_fixture("apple_podcast_listing.html"),
+        source_key="podcast_zapusk_zavtra",
+        source_label="Запуск завтра",
+        page_url="https://podcasts.apple.com/ru/podcast/%D0%B7%D0%B0%D0%BF%D1%83%D1%81%D0%BA-%D0%B7%D0%B0%D0%B2%D1%82%D1%80%D0%B0/id1488945593?l=en-GB",
+        now=datetime(2026, 3, 28, 6, 0, tzinfo=UTC),
+    )
+
+    assert [item.title for item in items] == [
+        "Гугл-поиск испортился? Как искать в интернете",
+        "Главное, что случилось в мире технологий в 2025 году",
+    ]
+    assert items[1].external_id == "1000743186549"
+    assert items[1].url.endswith("i=1000743186549&l=en-GB")
+    assert items[1].published_at == datetime(2026, 1, 6, 0, 0, tzinfo=UTC)
+
+
+def test_parse_apple_podcast_lookup_items_parses_free_episodes() -> None:
+    items = parse_apple_podcast_lookup_items(
+        read_fixture("apple_podcast_lookup.json"),
+        source_key="podcast_zapusk_zavtra",
+        source_label="Запуск завтра",
+    )
+
+    assert [item.title for item in items] == [
+        "Гугл-поиск испортился? Как искать в интернете",
+        "Почему всем так нужны видеокарты от NVIDIA",
+    ]
+    assert items[0].external_id == "1000757525621"
+    assert items[0].url.endswith("i=1000757525621")
+    assert items[0].published_at == datetime(2026, 3, 26, 15, 19, 39, tzinfo=UTC)
+
+
+def test_merge_podcast_items_keeps_paid_items_and_deduplicates_free_duplicates() -> None:
+    page_items = [
+        NormalizedNewsItem(
+            source_key="podcast_zapusk_zavtra",
+            source_label="Запуск завтра",
+            external_id="1000757525621",
+            title="Гугл-поиск испортился? Как искать в интернете",
+            url="https://podcasts.apple.com/ru/podcast/id1488945593?i=1000757525621&l=en-GB",
+            published_at=datetime(2026, 3, 27, 0, 0, tzinfo=UTC),
+        ),
+        NormalizedNewsItem(
+            source_key="podcast_zapusk_zavtra",
+            source_label="Запуск завтра",
+            external_id="1000743186549",
+            title="Главное, что случилось в мире технологий в 2025 году",
+            url="https://podcasts.apple.com/ru/podcast/id1488945593?i=1000743186549&l=en-GB",
+            published_at=datetime(2026, 1, 6, 0, 0, tzinfo=UTC),
+        ),
+    ]
+    lookup_items = [
+        NormalizedNewsItem(
+            source_key="podcast_zapusk_zavtra",
+            source_label="Запуск завтра",
+            external_id="1000757525621",
+            title="Гугл-поиск испортился? Как искать в интернете",
+            url="https://podcasts.apple.com/us/podcast/id1488945593?i=1000757525621",
+            published_at=datetime(2026, 3, 26, 15, 19, 39, tzinfo=UTC),
+        )
+    ]
+    rss_items = [
+        NormalizedNewsItem(
+            source_key="podcast_zapusk_zavtra",
+            source_label="Запуск завтра",
+            external_id="rss-duplicate",
+            title="Гугл-поиск испортился? Как искать в интернете",
+            url="https://share.transistor.fm/s/34c1e42a",
+            published_at=datetime(2026, 3, 26, 18, 19, 39, tzinfo=UTC),
+        ),
+        NormalizedNewsItem(
+            source_key="podcast_zapusk_zavtra",
+            source_label="Запуск завтра",
+            external_id="rss-archive",
+            title="Архивный выпуск",
+            url="https://share.transistor.fm/s/archive",
+            published_at=datetime(2024, 1, 1, 0, 0, tzinfo=UTC),
+        ),
+    ]
+
+    items = merge_podcast_items(page_items, lookup_items, rss_items)
+
+    assert [item.title for item in items] == [
+        "Гугл-поиск испортился? Как искать в интернете",
+        "Главное, что случилось в мире технологий в 2025 году",
+        "Архивный выпуск",
+    ]
 
 
 def test_parse_openai_blog_listing_extracts_unique_article_links_in_order() -> None:
