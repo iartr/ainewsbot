@@ -15,6 +15,7 @@ from newsbot.sources.openai_blog import (
     parse_openai_blog_article_title,
     parse_openai_blog_listing,
 )
+from newsbot.sources.rss import parse_rss_items
 from newsbot.sources.telegram_api import parse_telegram_changelog
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -31,6 +32,22 @@ def test_parse_openai_rss_returns_items() -> None:
     assert items[0].source_key == "openai"
     assert items[0].title == "How we monitor internal coding agents for misalignment"
     assert items[0].url == "https://openai.com/index/how-we-monitor-internal-coding-agents-misalignment"
+
+
+def test_parse_rss_items_parses_transistor_feed_entries() -> None:
+    items = parse_rss_items(
+        read_fixture("transistor_rss.xml"),
+        source_key="podcast_zapusk_zavtra",
+        source_label="Запуск завтра",
+    )
+
+    assert len(items) == 2
+    assert items[0].source_key == "podcast_zapusk_zavtra"
+    assert items[0].source_label == "Запуск завтра"
+    assert items[0].external_id == "episode-one"
+    assert items[0].title == "Episode One"
+    assert items[0].url == "https://example.com/podcast/episode-one"
+    assert items[0].published_at == datetime(2026, 3, 27, 7, 0, tzinfo=UTC)
 
 
 def test_parse_openai_blog_listing_extracts_unique_article_links_in_order() -> None:

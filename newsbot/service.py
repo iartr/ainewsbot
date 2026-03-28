@@ -64,20 +64,21 @@ class NewsBotService:
         return "\n".join(parts)
 
     async def bootstrap(self) -> bool:
-        if await self._repository.count_news_items() > 0:
-            return False
-
-        LOGGER.info("News database is empty, seeding current items without broadcasting")
+        seeded_any = False
         for source in self._sources:
+            if await self._repository.has_news_items_for_source(source.key):
+                continue
+
+            LOGGER.info("Source %s has no stored items, seeding current items without broadcasting", source.key)
             try:
                 items = await source.fetch(self._http_client)
             except Exception:
                 LOGGER.exception("Bootstrap fetch failed for source %s", source.key)
                 continue
 
-            for item in items:
-                await self._repository.insert_news_item(item)
-        return True
+            inserted_items = await self._repository.insert_news_items(items)
+            seeded_any = seeded_any or bool(inserted_items)
+        return seeded_any
 
     async def subscribe_chat(self, chat_id: int, chat_type: str) -> tuple[SubscriptionStatus, list[StoredNewsItem]]:
         status = await self._repository.upsert_subscriber(chat_id, chat_type)

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Test Podcast</title>
+    <item>
+      <title>Episode One</title>
+      <guid isPermaLink="false">episode-one</guid>
+      <link>https://example.com/podcast/episode-one</link>
+      <pubDate>Thu, 27 Mar 2026 07:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Episode Two</title>
+      <guid isPermaLink="false">episode-two</guid>
+      <link>https://example.com/podcast/episode-two</link>
+      <pubDate>Wed, 26 Mar 2026 07:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Episode Two Duplicate</title>
+      <guid isPermaLink="false">episode-two</guid>
+      <link>https://example.com/podcast/episode-two-duplicate</link>
+      <pubDate>Wed, 26 Mar 2026 07:30:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

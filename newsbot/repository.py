@@ -23,6 +23,20 @@ def _stored_news_item(model: NewsItem) -> StoredNewsItem:
     )
 
 
+def _unique_news_items(items: Sequence[NormalizedNewsItem]) -> list[NormalizedNewsItem]:
+    unique_items: list[NormalizedNewsItem] = []
+    seen_keys: set[tuple[str, str]] = set()
+
+    for item in items:
+        dedup_key = (item.source_key, item.external_id)
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+        unique_items.append(item)
+
+    return unique_items
+
+
 class Repository:
     def __init__(self, session_factory: async_sessionmaker):
         self._session_factory = session_factory
@@ -31,6 +45,10 @@ class Repository:
         async with self._session_factory() as session:
             value = await session.scalar(select(func.count()).select_from(NewsItem))
             return int(value or 0)
+
+    async def has_news_items_for_source(self, source_key: str) -> bool:
+        async with self._session_factory() as session:
+            return await session.scalar(select(NewsItem.id).where(NewsItem.source_key == source_key).limit(1)) is not None
 
     async def insert_news_item(self, item: NormalizedNewsItem) -> StoredNewsItem | None:
         async with self._session_factory() as session:
@@ -55,6 +73,53 @@ class Repository:
             await session.commit()
             await session.refresh(news_item)
             return _stored_news_item(news_item)
+
+    async def insert_news_items(self, items: Sequence[NormalizedNewsItem]) -> list[StoredNewsItem]:
+        unique_items = _unique_news_items(items)
+        if not unique_items:
+            return []
+
+        source_items: dict[str, list[NormalizedNewsItem]] = {}
+        for item in unique_items:
+            source_items.setdefault(item.source_key, []).append(item)
+
+        async with self._session_factory() as session:
+            existing_keys: set[tuple[str, str]] = set()
+            for source_key, group_items in source_items.items():
+                external_ids = [item.external_id for item in group_items]
+                existing_external_ids = (
+                    await session.scalars(
+                        select(NewsItem.external_id).where(
+                            NewsItem.source_key == source_key,
+                            NewsItem.external_id.in_(external_ids),
+                        )
+                    )
+                ).all()
+                existing_keys.update((source_key, external_id) for external_id in existing_external_ids)
+
+            models: list[NewsItem] = []
+            for item in unique_items:
+                if (item.source_key, item.external_id) in existing_keys:
+                    continue
+                models.append(
+                    NewsItem(
+                        source_key=item.source_key,
+                        external_id=item.external_id,
+                        title=item.title,
+                        url=item.url,
+                        published_at=item.published_at,
+                        discovered_at=item.discovered_at,
+                    )
+                )
+
+            if not models:
+                return []
+
+            session.add_all(models)
+            await session.flush()
+            stored_items = [_stored_news_item(model) for model in models]
+            await session.commit()
+            return stored_items
 
     async def latest_news(self, limit: int) -> list[StoredNewsItem]:
         order_query: Select[tuple[NewsItem]] = (

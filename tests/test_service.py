@@ -9,6 +9,7 @@ from sqlalchemy import select
 from newsbot.entities import NormalizedNewsItem, StoredNewsItem
 from newsbot.models import Delivery, NewsItem
 from newsbot.service import NewsBotService
+from newsbot.sources import build_sources
 from newsbot.sources.base import NewsSource
 
 
@@ -91,6 +92,115 @@ async def test_bootstrap_seeds_empty_database_without_broadcast(db_bundle) -> No
 
     assert changed is True
     assert [item.title for item in latest] == ["Second", "First"]
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_seeds_new_source_archive_without_broadcasting_existing_subscribers(db_bundle) -> None:
+    repository = db_bundle["repository"]
+    await repository.insert_news_item(
+        make_item("openai", "OpenAI", "existing", "Existing", datetime(2026, 3, 18, 10, 0, tzinfo=UTC))
+    )
+    await repository.upsert_subscriber(200, "private")
+
+    source = StaticSource(
+        "podcast_zapusk_zavtra",
+        "Запуск завтра",
+        [
+            make_item(
+                "podcast_zapusk_zavtra",
+                "Запуск завтра",
+                "episode-one",
+                "Episode One",
+                datetime(2026, 3, 19, 10, 0, tzinfo=UTC),
+            ),
+            make_item(
+                "podcast_zapusk_zavtra",
+                "Запуск завтра",
+                "episode-two",
+                "Episode Two",
+                datetime(2026, 3, 19, 11, 0, tzinfo=UTC),
+            ),
+        ],
+    )
+    service = NewsBotService(repository, [source], request_timeout_seconds=5, latest_on_start_count=3)
+    bot = FakeBot()
+
+    try:
+        changed = await service.bootstrap()
+        sent = await service.broadcast_new_items(bot)
+        latest = await repository.latest_news(10)
+    finally:
+        await service.aclose()
+
+    assert changed is True
+    assert sent == 0
+    assert bot.messages == []
+    assert [item.title for item in latest] == ["Episode Two", "Episode One", "Existing"]
+
+
+@pytest.mark.asyncio
+async def test_poll_after_source_bootstrap_broadcasts_only_new_episode(db_bundle) -> None:
+    repository = db_bundle["repository"]
+    await repository.upsert_subscriber(1, "private")
+
+    source = StaticSource(
+        "podcast_konkurenty",
+        "Конкуренты",
+        [
+            make_item(
+                "podcast_konkurenty",
+                "Конкуренты",
+                "episode-one",
+                "Episode One",
+                datetime(2026, 3, 19, 10, 0, tzinfo=UTC),
+            )
+        ],
+    )
+    service = NewsBotService(repository, [source], request_timeout_seconds=5, latest_on_start_count=3)
+    bot = FakeBot()
+
+    try:
+        changed = await service.bootstrap()
+        source._items = [
+            make_item(
+                "podcast_konkurenty",
+                "Конкуренты",
+                "episode-two",
+                "Episode Two",
+                datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
+            ),
+            make_item(
+                "podcast_konkurenty",
+                "Конкуренты",
+                "episode-one",
+                "Episode One",
+                datetime(2026, 3, 19, 10, 0, tzinfo=UTC),
+            ),
+        ]
+        sent = await service.broadcast_new_items(bot)
+        latest = await repository.latest_news(10)
+    finally:
+        await service.aclose()
+
+    assert changed is True
+    assert sent == 1
+    assert bot.messages == [(1, "Конкуренты\n20.03.2026\nEpisode Two\nhttps://example.com/episode-two")]
+    assert [item.title for item in latest] == ["Episode Two", "Episode One"]
+
+
+def test_build_sources_includes_podcasts_in_order() -> None:
+    sources = build_sources()
+
+    assert [(source.key, source.label) for source in sources] == [
+        ("openai", "OpenAI"),
+        ("openai_blog", "OpenAI Blog"),
+        ("anthropic", "Anthropic Newsroom"),
+        ("claude_blog", "Claude Blog"),
+        ("telegram_bot_api", "Telegram Bot API"),
+        ("podcast_zapusk_zavtra", "Запуск завтра"),
+        ("podcast_konkurenty", "Конкуренты"),
+        ("podcast_pochemu_my_eshche_zhivy", "Почему мы еще живы"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -198,6 +308,9 @@ async def test_latest_and_sources_views_are_available(db_bundle) -> None:
             StaticSource("anthropic", "Anthropic Newsroom"),
             StaticSource("claude_blog", "Claude Blog"),
             StaticSource("telegram_bot_api", "Telegram Bot API"),
+            StaticSource("podcast_zapusk_zavtra", "Запуск завтра"),
+            StaticSource("podcast_konkurenty", "Конкуренты"),
+            StaticSource("podcast_pochemu_my_eshche_zhivy", "Почему мы еще живы"),
         ],
         request_timeout_seconds=5,
         latest_on_start_count=3,
@@ -241,6 +354,33 @@ async def test_latest_and_sources_views_are_available(db_bundle) -> None:
         await repository.insert_news_item(
             make_item("telegram_bot_api", "Telegram Bot API", "telegram-0", "Telegram 0", now - timedelta(days=1))
         )
+        await repository.insert_news_item(
+            make_item(
+                "podcast_zapusk_zavtra",
+                "Запуск завтра",
+                "zapusk-0",
+                "Запуск 0",
+                now - timedelta(days=2),
+            )
+        )
+        await repository.insert_news_item(
+            make_item(
+                "podcast_konkurenty",
+                "Конкуренты",
+                "konkurenty-0",
+                "Конкуренты 0",
+                now - timedelta(days=3),
+            )
+        )
+        await repository.insert_news_item(
+            make_item(
+                "podcast_pochemu_my_eshche_zhivy",
+                "Почему мы еще живы",
+                "zhivy-0",
+                "Живы 0",
+                now - timedelta(days=4),
+            )
+        )
 
         latest = await service.latest_news(limit=3)
         grouped = await service.latest_news_per_source(limit_per_source=3)
@@ -255,13 +395,28 @@ async def test_latest_and_sources_views_are_available(db_bundle) -> None:
         "Anthropic Newsroom",
         "Claude Blog",
         "Telegram Bot API",
+        "Запуск завтра",
+        "Конкуренты",
+        "Почему мы еще живы",
     ]
     assert [item.title for item in grouped[0][1]] == ["OpenAI 0", "OpenAI 1", "OpenAI 2"]
     assert [item.title for item in grouped[1][1]] == ["OpenAI Blog 0", "OpenAI Blog 1"]
     assert [item.title for item in grouped[2][1]] == ["Anthropic 0", "Anthropic 1"]
     assert [item.title for item in grouped[3][1]] == ["Claude Blog 0", "Claude Blog 1"]
     assert [item.title for item in grouped[4][1]] == ["Telegram 0"]
-    assert labels == ["OpenAI", "OpenAI Blog", "Anthropic Newsroom", "Claude Blog", "Telegram Bot API"]
+    assert [item.title for item in grouped[5][1]] == ["Запуск 0"]
+    assert [item.title for item in grouped[6][1]] == ["Конкуренты 0"]
+    assert [item.title for item in grouped[7][1]] == ["Живы 0"]
+    assert labels == [
+        "OpenAI",
+        "OpenAI Blog",
+        "Anthropic Newsroom",
+        "Claude Blog",
+        "Telegram Bot API",
+        "Запуск завтра",
+        "Конкуренты",
+        "Почему мы еще живы",
+    ]
 
 
 def test_format_news_item_includes_date_when_available() -> None:
