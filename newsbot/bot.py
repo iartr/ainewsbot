@@ -10,6 +10,7 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Contex
 
 from newsbot.config import Settings
 from newsbot.db import run_migrations
+from newsbot.logging_config import configure_logging
 from newsbot.service import NewsBotService
 
 LOGGER = logging.getLogger(__name__)
@@ -101,6 +102,8 @@ async def post_init(application: Application) -> None:
     service: NewsBotService = application.bot_data[SERVICE_KEY]
 
     await asyncio.to_thread(run_migrations, settings.database_url)
+    # Alembic's fileConfig (run above) resets the root logger to WARN; restore ours.
+    configure_logging(settings.log_level)
     await service.bootstrap()
 
     if application.job_queue is None:

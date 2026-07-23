@@ -11,7 +11,9 @@ from newsbot.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False so running migrations at app startup does not
+    # silently disable the already-configured ``newsbot.*`` loggers.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
