@@ -208,6 +208,8 @@ def merge_podcast_items(*collections: list[NormalizedNewsItem]) -> list[Normaliz
 
 
 class ApplePodcastSource(NewsSource):
+    broadcast_immediately = True
+
     def __init__(self, *, key: str, label: str, page_url: str, lookup_id: str, feed_url: str):
         self.key = key
         self.label = label

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
+from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
@@ -88,6 +90,12 @@ async def poll_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     LOGGER.info("Polling cycle finished, delivered %s notifications", sent)
 
 
+async def digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    service: NewsBotService = context.application.bot_data[SERVICE_KEY]
+    sent = await service.send_daily_digest(context.bot)
+    LOGGER.info("Daily digest finished, delivered to %s chats", sent)
+
+
 async def post_init(application: Application) -> None:
     settings: Settings = application.bot_data[SETTINGS_KEY]
     service: NewsBotService = application.bot_data[SERVICE_KEY]
@@ -105,6 +113,19 @@ async def post_init(application: Application) -> None:
         name="news-poller",
     )
     LOGGER.info("Scheduled polling every %s minutes", settings.poll_interval_minutes)
+
+    digest_time = dt.time(
+        hour=settings.digest_hour,
+        minute=settings.digest_minute,
+        tzinfo=ZoneInfo(settings.digest_timezone),
+    )
+    application.job_queue.run_daily(digest_job, time=digest_time, name="daily-digest")
+    LOGGER.info(
+        "Scheduled daily digest at %02d:%02d %s",
+        settings.digest_hour,
+        settings.digest_minute,
+        settings.digest_timezone,
+    )
 
 
 async def post_shutdown(application: Application) -> None:

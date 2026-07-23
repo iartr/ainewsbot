@@ -20,6 +20,8 @@ def main() -> None:
         sources=build_sources(),
         request_timeout_seconds=settings.request_timeout_seconds,
         latest_on_start_count=settings.latest_on_start_count,
+        openai_api_key=settings.openai_api_key,
+        classifier_model=settings.classifier_model,
     )
 
     application = create_application(settings, service, engine)

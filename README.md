@@ -25,6 +25,16 @@ Telegram bot that watches OpenAI News RSS, OpenAI Blog, Anthropic Newsroom, Clau
 - `POLL_INTERVAL_MINUTES` - source polling cadence, defaults to `15`.
 - `REQUEST_TIMEOUT_SECONDS` - HTTP timeout per request, defaults to `20`.
 - `LOG_LEVEL` - defaults to `INFO`.
+- `OPENAI_API_KEY` - optional. Enables instant alerts for brand-new model releases; without it every non-podcast item waits for the daily digest.
+- `OPENAI_CLASSIFIER_MODEL` - cheap OpenAI model used to classify headlines, defaults to `gpt-5.4-nano`.
+- `DIGEST_HOUR` / `DIGEST_MINUTE` - daily digest time, defaults to `19:00`.
+- `DIGEST_TIMEZONE` - IANA timezone for the digest, defaults to `Europe/Moscow`.
+
+## Delivery Behavior
+
+- **Podcasts** are delivered immediately as they appear.
+- **New model releases** (OpenAI, Anthropic, Moonshot/Kimi, …) are detected by the LLM classifier and delivered immediately.
+- **All other lab news** is collected into a single **daily digest** sent at `DIGEST_HOUR` (one line per item, newest first). If the classifier is disabled or fails, items simply flow into the digest.
 
 ## Local Setup
 

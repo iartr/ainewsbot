@@ -31,9 +31,17 @@ def make_item(
 
 
 class StaticSource(NewsSource):
-    def __init__(self, key: str, label: str, items=None, error: Exception | None = None):
+    def __init__(
+        self,
+        key: str,
+        label: str,
+        items=None,
+        error: Exception | None = None,
+        broadcast_immediately: bool = False,
+    ):
         self.key = key
         self.label = label
+        self.broadcast_immediately = broadcast_immediately
         self._items = list(items or [])
         self._error = error
 
@@ -43,15 +51,35 @@ class StaticSource(NewsSource):
         return list(self._items)
 
 
+class StubClassifier:
+    """Deterministic classifier double so tests never hit the network."""
+
+    def __init__(self, result: bool):
+        self._result = result
+        self.calls: list[tuple[str, str]] = []
+
+    async def is_model_release(self, *, title: str, source_label: str) -> bool:
+        self.calls.append((title, source_label))
+        return self._result
+
+
 class FakeBot:
     def __init__(self, fail_chat_ids=None):
         self.fail_chat_ids = set(fail_chat_ids or [])
         self.messages: list[tuple[int, str]] = []
+        self.parse_modes: list[str | None] = []
 
-    async def send_message(self, chat_id: int, text: str, disable_web_page_preview: bool = True) -> None:
+    async def send_message(
+        self,
+        chat_id: int,
+        text: str,
+        disable_web_page_preview: bool = True,
+        parse_mode: str | None = None,
+    ) -> None:
         if chat_id in self.fail_chat_ids:
             raise RuntimeError(f"send failure for {chat_id}")
         self.messages.append((chat_id, text))
+        self.parse_modes.append(parse_mode)
 
 
 def make_stored_item(
@@ -155,6 +183,7 @@ async def test_poll_after_source_bootstrap_broadcasts_only_new_episode(db_bundle
                 datetime(2026, 3, 19, 10, 0, tzinfo=UTC),
             )
         ],
+        broadcast_immediately=True,
     )
     service = NewsBotService(repository, [source], request_timeout_seconds=5, latest_on_start_count=3)
     bot = FakeBot()
@@ -196,6 +225,7 @@ def test_build_sources_includes_podcasts_in_order() -> None:
         ("openai_blog", "OpenAI Blog"),
         ("anthropic", "Anthropic Newsroom"),
         ("claude_blog", "Claude Blog"),
+        ("moonshot", "Moonshot AI"),
         ("telegram_bot_api", "Telegram Bot API"),
         ("podcast_zapusk_zavtra", "Запуск завтра"),
         ("podcast_konkurenty", "Конкуренты"),
@@ -245,7 +275,13 @@ async def test_poll_and_broadcast_is_deduplicated(db_bundle) -> None:
         "OpenAI",
         [make_item("openai", "OpenAI", "same-item", "One title", datetime(2026, 3, 20, 10, 0, tzinfo=UTC))],
     )
-    service = NewsBotService(repository, [source], request_timeout_seconds=5, latest_on_start_count=3)
+    service = NewsBotService(
+        repository,
+        [source],
+        request_timeout_seconds=5,
+        latest_on_start_count=3,
+        classifier=StubClassifier(True),
+    )
     bot = FakeBot()
 
     try:
@@ -276,7 +312,13 @@ async def test_delivery_failures_are_recorded_without_blocking_other_chats(db_bu
         [make_item("telegram_bot_api", "Telegram Bot API", "bot-api-9.5", "March 1, 2026 / Bot API 9.5", datetime(2026, 3, 1, 0, 0, tzinfo=UTC))],
     )
     bad_source = StaticSource("broken", "Broken Source", error=RuntimeError("upstream unavailable"))
-    service = NewsBotService(repository, [bad_source, source], request_timeout_seconds=5, latest_on_start_count=3)
+    service = NewsBotService(
+        repository,
+        [bad_source, source],
+        request_timeout_seconds=5,
+        latest_on_start_count=3,
+        classifier=StubClassifier(True),
+    )
     bot = FakeBot(fail_chat_ids={2})
 
     try:
@@ -493,3 +535,221 @@ def test_format_latest_news_item_omits_date_when_missing() -> None:
         asyncio.run(service.aclose())
 
     assert formatted == "Latest without date\nhttps://example.com/latest-item-no-date"
+
+
+def test_format_digest_line_uses_html_anchor_with_source_and_date() -> None:
+    service = NewsBotService(object(), [], request_timeout_seconds=5, latest_on_start_count=3)
+
+    item = make_item("openai", "OpenAI", "x", "New & shiny <model>", datetime(2026, 3, 20, 10, 0, tzinfo=UTC))
+
+    try:
+        line = service.format_digest_line(item)
+    finally:
+        asyncio.run(service.aclose())
+
+    assert line == 'OpenAI — 20.03.2026 — <a href="https://example.com/x">New &amp; shiny &lt;model&gt;</a>'
+
+
+def test_format_digest_line_omits_date_when_missing() -> None:
+    service = NewsBotService(object(), [], request_timeout_seconds=5, latest_on_start_count=3)
+
+    item = make_item("moonshot", "Moonshot AI", "y", "Kimi update", None)
+
+    try:
+        line = service.format_digest_line(item)
+    finally:
+        asyncio.run(service.aclose())
+
+    assert line == 'Moonshot AI — <a href="https://example.com/y">Kimi update</a>'
+
+
+@pytest.mark.asyncio
+async def test_non_release_lab_items_are_held_for_daily_digest(db_bundle) -> None:
+    repository = db_bundle["repository"]
+    session_factory = db_bundle["session_factory"]
+    await repository.upsert_subscriber(1, "private")
+
+    source = StaticSource(
+        "openai",
+        "OpenAI",
+        [
+            make_item("openai", "OpenAI", "newer", "Newer headline", datetime(2026, 3, 20, 12, 0, tzinfo=UTC)),
+            make_item("openai", "OpenAI", "older", "Older headline", datetime(2026, 3, 20, 9, 0, tzinfo=UTC)),
+        ],
+    )
+    classifier = StubClassifier(False)
+    service = NewsBotService(
+        repository,
+        [source],
+        request_timeout_seconds=5,
+        latest_on_start_count=3,
+        classifier=classifier,
+    )
+    bot = FakeBot()
+
+    try:
+        sent = await service.broadcast_new_items(bot)
+        pending = await repository.pending_digest_items()
+        async with session_factory() as session:
+            items = list((await session.scalars(select(NewsItem))).all())
+    finally:
+        await service.aclose()
+
+    assert sent == 0
+    assert bot.messages == []
+    assert len(classifier.calls) == 2
+    assert {item.title for item in pending} == {"Newer headline", "Older headline"}
+    assert all(item.pending_digest for item in items)
+    assert not any(item.is_model_release for item in items)
+
+
+@pytest.mark.asyncio
+async def test_disabled_classifier_holds_lab_items(db_bundle) -> None:
+    repository = db_bundle["repository"]
+    await repository.upsert_subscriber(1, "private")
+
+    source = StaticSource(
+        "openai",
+        "OpenAI",
+        [make_item("openai", "OpenAI", "item", "Some headline", datetime(2026, 3, 20, 12, 0, tzinfo=UTC))],
+    )
+    # No classifier and no API key => classification disabled => everything held.
+    service = NewsBotService(repository, [source], request_timeout_seconds=5, latest_on_start_count=3)
+    bot = FakeBot()
+
+    try:
+        sent = await service.broadcast_new_items(bot)
+        pending = await repository.pending_digest_items()
+    finally:
+        await service.aclose()
+
+    assert sent == 0
+    assert bot.messages == []
+    assert [item.title for item in pending] == ["Some headline"]
+
+
+@pytest.mark.asyncio
+async def test_model_release_is_broadcast_immediately(db_bundle) -> None:
+    repository = db_bundle["repository"]
+    session_factory = db_bundle["session_factory"]
+    await repository.upsert_subscriber(1, "private")
+
+    source = StaticSource(
+        "anthropic",
+        "Anthropic Newsroom",
+        [
+            make_item(
+                "anthropic",
+                "Anthropic Newsroom",
+                "claude-x",
+                "Introducing Claude X",
+                datetime(2026, 3, 20, 12, 0, tzinfo=UTC),
+            )
+        ],
+    )
+    service = NewsBotService(
+        repository,
+        [source],
+        request_timeout_seconds=5,
+        latest_on_start_count=3,
+        classifier=StubClassifier(True),
+    )
+    bot = FakeBot()
+
+    try:
+        sent = await service.broadcast_new_items(bot)
+        pending = await repository.pending_digest_items()
+        async with session_factory() as session:
+            item = (await session.scalars(select(NewsItem))).one()
+    finally:
+        await service.aclose()
+
+    assert sent == 1
+    assert bot.messages == [
+        (1, "Anthropic Newsroom\n20.03.2026\nIntroducing Claude X\nhttps://example.com/claude-x")
+    ]
+    assert bot.parse_modes == [None]
+    assert pending == []
+    assert item.is_model_release is True
+    assert item.pending_digest is False
+
+
+@pytest.mark.asyncio
+async def test_send_daily_digest_batches_pending_items_and_clears_them(db_bundle) -> None:
+    repository = db_bundle["repository"]
+    session_factory = db_bundle["session_factory"]
+    await repository.upsert_subscriber(1, "private")
+
+    source = StaticSource(
+        "openai",
+        "OpenAI",
+        [
+            make_item("openai", "OpenAI", "newer", "Newer headline", datetime(2026, 3, 20, 12, 0, tzinfo=UTC)),
+            make_item("openai", "OpenAI", "older", "Older headline", datetime(2026, 3, 20, 9, 0, tzinfo=UTC)),
+        ],
+    )
+    service = NewsBotService(
+        repository,
+        [source],
+        request_timeout_seconds=5,
+        latest_on_start_count=3,
+        classifier=StubClassifier(False),
+    )
+    bot = FakeBot()
+
+    try:
+        await service.broadcast_new_items(bot)  # both items held for the digest
+        assert bot.messages == []
+
+        delivered = await service.send_daily_digest(bot)
+        pending_after = await repository.pending_digest_items()
+        delivered_again = await service.send_daily_digest(bot)
+
+        async with session_factory() as session:
+            deliveries = list((await session.scalars(select(Delivery))).all())
+    finally:
+        await service.aclose()
+
+    assert delivered == 1
+    assert len(bot.messages) == 1
+    chat_id, text = bot.messages[0]
+    assert chat_id == 1
+    assert bot.parse_modes == ["HTML"]
+    assert text == (
+        'OpenAI — 20.03.2026 — <a href="https://example.com/newer">Newer headline</a>\n'
+        'OpenAI — 20.03.2026 — <a href="https://example.com/older">Older headline</a>'
+    )
+    assert pending_after == []
+    assert delivered_again == 0
+    assert len(deliveries) == 2
+    assert all(delivery.sent_at is not None for delivery in deliveries)
+
+
+@pytest.mark.asyncio
+async def test_send_daily_digest_keeps_pending_when_no_subscribers(db_bundle) -> None:
+    repository = db_bundle["repository"]
+
+    source = StaticSource(
+        "openai",
+        "OpenAI",
+        [make_item("openai", "OpenAI", "held", "Held headline", datetime(2026, 3, 20, 12, 0, tzinfo=UTC))],
+    )
+    service = NewsBotService(
+        repository,
+        [source],
+        request_timeout_seconds=5,
+        latest_on_start_count=3,
+        classifier=StubClassifier(False),
+    )
+    bot = FakeBot()
+
+    try:
+        await service.broadcast_new_items(bot)
+        delivered = await service.send_daily_digest(bot)
+        pending = await repository.pending_digest_items()
+    finally:
+        await service.aclose()
+
+    assert delivered == 0
+    assert bot.messages == []
+    assert [item.title for item in pending] == ["Held headline"]

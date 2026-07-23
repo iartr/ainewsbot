@@ -15,6 +15,7 @@ from newsbot.sources.claude_blog import (
     parse_claude_blog_listing,
 )
 from newsbot.entities import NormalizedNewsItem
+from newsbot.sources.moonshot import parse_moonshot_blog_listing
 from newsbot.sources.openai import parse_openai_rss
 from newsbot.sources.openai_blog import (
     parse_openai_blog_article_published_at,
@@ -194,6 +195,22 @@ def test_parse_claude_blog_article_extracts_visible_title_and_published_at() -> 
 
     assert parse_claude_blog_article_title(content) == "Claude now creates interactive charts, diagrams and visualizations"
     assert parse_claude_blog_article_published_at(content) == datetime(2026, 3, 12, 0, 0, tzinfo=UTC)
+
+
+def test_parse_moonshot_blog_listing_extracts_cards_in_order() -> None:
+    items = parse_moonshot_blog_listing(read_fixture("moonshot_blog_listing.html"))
+
+    assert [item.url for item in items] == [
+        "https://www.kimi.com/blog/kimi-k3",
+        "https://www.kimi.com/blog/kimi-k2-6",
+        "https://www.kimi.com/blog/kimi-k2-thinking",
+    ]
+    assert [item.title for item in items] == ["Kimi K3", "Kimi K2.6", "Kimi K2 Thinking"]
+    assert [item.published_at for item in items] == [
+        datetime(2026, 7, 16, 0, 0, tzinfo=UTC),
+        datetime(2026, 4, 20, 0, 0, tzinfo=UTC),
+        datetime(2025, 11, 6, 0, 0, tzinfo=UTC),
+    ]
 
 
 def test_parse_anthropic_listing_extracts_unique_article_links() -> None:

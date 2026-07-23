@@ -3,6 +3,7 @@ from __future__ import annotations
 from newsbot.sources.anthropic import AnthropicNewsSource
 from newsbot.sources.apple_podcasts import ApplePodcastSource
 from newsbot.sources.claude_blog import ClaudeBlogSource
+from newsbot.sources.moonshot import MoonshotNewsSource
 from newsbot.sources.openai import OpenAINewsSource
 from newsbot.sources.openai_blog import OpenAIBlogSource
 from newsbot.sources.telegram_api import TelegramBotApiSource
@@ -38,6 +39,7 @@ def build_sources() -> list:
         OpenAIBlogSource(),
         AnthropicNewsSource(),
         ClaudeBlogSource(),
+        MoonshotNewsSource(),
         TelegramBotApiSource(),
     ]
     sources.extend(

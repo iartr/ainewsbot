@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Literal
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from newsbot.entities import NormalizedNewsItem, StoredNewsItem, SubscriberRecord, utcnow
@@ -159,6 +159,41 @@ class Repository:
         async with self._session_factory() as session:
             models = (await session.scalars(query)).all()
         return [_stored_news_item(model) for model in models]
+
+    async def mark_pending_digest(self, item_id: int) -> None:
+        async with self._session_factory() as session:
+            item = await session.get(NewsItem, item_id)
+            if item is None:
+                return
+            item.pending_digest = True
+            await session.commit()
+
+    async def mark_model_release(self, item_id: int) -> None:
+        async with self._session_factory() as session:
+            item = await session.get(NewsItem, item_id)
+            if item is None:
+                return
+            item.is_model_release = True
+            await session.commit()
+
+    async def pending_digest_items(self) -> list[StoredNewsItem]:
+        query: Select[tuple[NewsItem]] = (
+            select(NewsItem)
+            .where(NewsItem.pending_digest.is_(True))
+            .order_by(NewsItem.published_at.desc().nullslast(), NewsItem.discovered_at.desc())
+        )
+        async with self._session_factory() as session:
+            models = (await session.scalars(query)).all()
+        return [_stored_news_item(model) for model in models]
+
+    async def clear_pending_digest(self, item_ids: Sequence[int]) -> None:
+        if not item_ids:
+            return
+        async with self._session_factory() as session:
+            await session.execute(
+                update(NewsItem).where(NewsItem.id.in_(item_ids)).values(pending_digest=False)
+            )
+            await session.commit()
 
     async def upsert_subscriber(self, chat_id: int, chat_type: str) -> SubscriptionStatus:
         async with self._session_factory() as session:

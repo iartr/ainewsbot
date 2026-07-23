@@ -40,6 +40,9 @@ def parse_struct_time(value: struct_time | None) -> datetime | None:
 class NewsSource(ABC):
     key: str
     label: str
+    # When True, new items are broadcast the moment they are discovered instead of
+    # being collected into the daily digest (used for podcasts).
+    broadcast_immediately: bool = False
 
     @abstractmethod
     async def fetch(self, client: httpx.AsyncClient) -> list[NormalizedNewsItem]:

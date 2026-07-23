@@ -12,6 +12,11 @@ class Settings:
     request_timeout_seconds: int = 20
     latest_on_start_count: int = 3
     log_level: str = "INFO"
+    openai_api_key: str | None = None
+    classifier_model: str = "gpt-5.4-nano"
+    digest_hour: int = 19
+    digest_minute: int = 0
+    digest_timezone: str = "Europe/Moscow"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -37,5 +42,10 @@ class Settings:
             request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "20")),
             latest_on_start_count=int(os.getenv("LATEST_ON_START_COUNT", "3")),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+            openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+            classifier_model=os.getenv("OPENAI_CLASSIFIER_MODEL", "gpt-5.4-nano"),
+            digest_hour=int(os.getenv("DIGEST_HOUR", "19")),
+            digest_minute=int(os.getenv("DIGEST_MINUTE", "0")),
+            digest_timezone=os.getenv("DIGEST_TIMEZONE", "Europe/Moscow"),
         )
 
